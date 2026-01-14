@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Maze & Corridor - True Spiral Edition</title>
+    <style>
+        body { background: #ffffff; font-family: sans-serif; text-align: center; padding: 20px; color: #333; }
+        .controls { background: #f9f9f9; padding: 15px; border: 1px solid #eee; display: inline-block; margin-bottom: 30px; border-radius: 5px; }
+        #mazeOutput { 
+            display: inline-block; text-align: left;
+            font-family: "MS Gothic", "Osaka-mono", "monospace"; 
+            font-size: 18px; line-height: 1.0; 
+            background: transparent; white-space: pre; letter-spacing: 0; color: #000;
+        }
+        button { cursor: pointer; padding: 5px 15px; margin-left: 10px; }
+        input { width: 45px; }
+    </style>
+</head>
+<body>
+
+<div class="controls">
+    縦(rows): <input type="number" id="rows" value="5" min="3" max="30">
+    横(cols): <input type="number" id="cols" value="5" min="3" max="30">
+    方式: 
+    <select id="type">
+        <option value="normal">部屋型</option>
+        <option value="spiral" selected>螺旋型</option>
+        <option value="corridor">廊下型</option>
+    </select>
+    <button onclick="run()">生成！</button>
+</div>
+<br>
+<pre id="mazeOutput"></pre>
+<div class="regend">
+凡例　！:入り口　▲:出口　＋－｜:壁
+</div>
+
+<script>
+function isSolvable(grid, start, goal) {
+    const H = grid.length, W = grid[0].length;
+    let q = [[start.y, start.x]];
+    let visited = Array.from({ length: H }, () => Array(W).fill(false));
+    visited[start.y][start.x] = true;
+    while (q.length > 0) {
+        let [y, x] = q.shift();
+        if (y === goal.y && x === goal.x) return true;
+        [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dy, dx]) => {
+            let ny = y + dy, nx = x + dx;
+            if (ny >= 0 && ny < H && nx >= 0 && nx < W && !visited[ny][nx] && grid[ny][nx] !== 1) {
+                visited[ny][nx] = true; q.push([ny, nx]);
+            }
+        });
+    }
+    return false;
+}
+
+function generateData(rows, cols, type) {
+    const H = 2 * rows + 1, W = 2 * cols + 1;
+    let grid, ent, ext;
+
+    for (let attempt = 0; attempt < 100; attempt++) {
+        grid = Array.from({ length: H }, () => Array(W).fill(1));
+        let visited = Array.from({ length: rows }, () => Array(cols).fill(false));
+
+        if (type === 'corridor') {
+            // Corridor ロジック (genCorridor.py 準拠)
+            for(let r=0; r<rows; r++) for(let c=0; c<cols; c++) grid[2*r+1][2*c+1] = 0;
+            for(let r=0; r<rows; r++) {
+                let part = (Math.random() < 0.3 && cols > 1) ? Math.floor(Math.random()*(cols-1))+1 : null;
+                for(let c=0; c<cols-1; c++) grid[2*r+1][2*(c+1)] = (part === c+1) ? 1 : 0;
+            }
+            for(let r=0; r<rows-1; r++) grid[2*r+2][2*Math.floor(Math.random()*cols)+1] = 0;
+            ent = {y: H - 1, x: 2 * Math.floor(Math.random() * cols) + 1};
+            ext = {y: 0, x: 2 * Math.floor(Math.random() * cols) + 1};
+        } else {
+            const isSpiral = (type === 'spiral');
+            function dfs(r, c) {
+                visited[r][c] = true; grid[2*r+1][2*c+1] = 0;
+                let dirs = [[0,1],[0,-1],[1,0],[-1,0]];
+                if (isSpiral) {
+                    dirs.sort((a,b) => {
+                        let da = Math.abs((r+a[0])-(rows/2)) + Math.abs((c+a[1])-(cols/2));
+                        let db = Math.abs((r+b[0])-(rows/2)) + Math.abs((c+b[1])-(cols/2));
+                        return db - da;
+                    });
+                    if (Math.random() < 0.3) dirs.sort(() => Math.random() - 0.5);
+                } else {
+                    dirs.sort(() => Math.random() - 0.5);
+                }
+                for(let [dr, dc] of dirs) {
+                    let nr = r+dr, nc = c+dc;
+                    if(nr>=0 && nr<rows && nc>=0 && nc<cols && !visited[nr][nc]) {
+                        grid[2*r+1+dr][2*c+1+dc] = 0; dfs(nr, nc);
+                    }
+                }
+            }
+            if (isSpiral) {
+                dfs(rows - 1, 0); // 左下から開始
+                // 入口：底辺の左端 / 出口：左辺の下端（角を挟んだ別々の壁）
+                ent = {y: H - 1, x: 1}; 
+                ext = {y: 2*(rows-1)+1, x: 0}; 
+            } else {
+                dfs(Math.floor(Math.random()*rows), Math.floor(Math.random()*cols));
+                ent = {y: H - 1, x: 2 * Math.floor(Math.random() * cols) + 1};
+                ext = {y: 0, x: 2 * Math.floor(Math.random() * cols) + 1};
+            }
+        }
+
+        // 判定用に座標を一時的に通路化
+        if (ent.x >= 0 && ent.x < W) grid[ent.y][ent.x] = 0;
+        if (ext.x >= 0 && ext.x < W) grid[ext.y][ext.x] = 0;
+
+        if (isSolvable(grid, ent, ext)) {
+            grid[ent.y][ent.x] = 'ENT';
+            grid[ext.y][ext.x] = 'EXT';
+            return grid;
+        }
+    }
+    return grid;
+}
+
+function render(grid) {
+    let output = "";
+    for(let y=0; y<grid.length; y++) {
+        for(let x=0; x<grid[0].length; x++) {
+            let v = grid[y][x];
+            if(v === 1) {
+                let u = (y>0 && grid[y-1][x]===1), d = (y<grid.length-1 && grid[y+1][x]===1);
+                let l = (x>0 && grid[y][x-1]===1), r = (x<grid[0].length-1 && grid[y][x+1]===1);
+                if((l||r) && !(u||d)) output += "－";
+                else if((u||d) && !(l||r)) output += "｜";
+                else output += "＋";
+            } else if(v === 0) output += "　";
+            else if(v === 'ENT') output += "！";
+            else if(v === 'EXT') output += "▲";
+        }
+        output += "\n";
+    }
+    return output;
+}
+
+function run() {
+    const r = parseInt(document.getElementById('rows').value);
+    const c = parseInt(document.getElementById('cols').value);
+    const t = document.getElementById('type').value;
+    document.getElementById('mazeOutput').innerText = render(generateData(r, c, t));
+}
+window.onload = run;
+</script>
+</body>
+</html>
